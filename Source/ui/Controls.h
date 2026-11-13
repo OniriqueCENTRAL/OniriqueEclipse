@@ -54,6 +54,7 @@ public:
     ~Knob() override { slider.setLookAndFeel (nullptr); }
 
     void setScale (float s) { scale = s; resized(); }
+    void setLabel (const juce::String& t) { if (label != t) { label = t; slider.setTitle (t); repaint(); } }
 
     void resized() override
     {

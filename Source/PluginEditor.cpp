@@ -7,15 +7,34 @@ namespace
 const juce::String pluginName = "ONIRIQUE ECLIPSE";
 using R = juce::Rectangle<float>;
 
-// la façade, en points (sous la barre de 50)
+// tailles des potards (composant entier : étiquette + bouton + valeur)
+const juce::Point<float> big { 112, 140 }, medium { 86, 110 }, small { 72, 94 }, mini { 64, 76 };
+constexpr float titleH = 26.0f;
+
+// ---- façade STUDIO (en points, sous la barre de 50)
+namespace studio
+{
 const R displayArea { 20, 62, 950, 270 }, meterArea { 982, 62, 198, 270 };
 const R lowPanel { 20, 346, 300, 238 }, midPanel { 332, 346, 536, 238 }, highPanel { 880, 346, 300, 238 };
 const R filterPanel { 20, 598, 220, 190 }, msPanel { 252, 598, 340, 190 }, analogPanel { 604, 598, 150, 190 },
         monitorPanel { 766, 598, 200, 190 }, outPanel { 978, 598, 202, 190 };
-constexpr float titleH = 26.0f;
+}
 
-// tailles des potards (composant entier : étiquette + bouton + valeur)
-const juce::Point<float> big { 112, 140 }, medium { 86, 110 }, small { 72, 94 };
+// ---- façade RACK : trois unités empilées
+namespace rack
+{
+const R unitA { 12, 58, 1176, 386 }, unitB { 12, 452, 1176, 92 }, unitC { 12, 552, 1176, 240 };
+const R lowPanel { 160, 68, 220, 366 }, centrePanel { 390, 68, 420, 366 }, highPanel { 820, 68, 220, 366 };
+const R soloPanel { 160, 460, 220, 76 }, msPanel { 390, 460, 420, 76 }, monitorPanel { 820, 460, 220, 76 };
+const R displayArea { 24, 562, 890, 220 }, meterArea { 924, 562, 252, 220 };
+constexpr float leftX = 86, rightX = 1114, bigY = 170, row2 = 286, row3 = 380;
+constexpr float contourX = 462, midX = 738;
+}
+
+juce::File viewFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Onirique").getChildFile ("eclipse-view.txt");
+}
 } // namespace
 
 //==============================================================================
@@ -23,10 +42,13 @@ EclipseEditor::EclipseEditor (EclipseProcessor& proc)
     : AudioProcessorEditor (proc), processor (proc),
       curve (proc.apvts, [&proc] { return proc.readParams(); }, [&proc] { return proc.getWorkingRate(); }),
       meterPanel (proc.meters()),
-      lowBoost (p (params::lowBoost), "BOOST", knobLook), lowFreq (p (params::lowFreq), "FREQ", knobLook), lowAtten (p (params::lowAtten), "ATTEN", knobLook),
+      lowBoost (p (params::lowBoost), "BOOST", knobLook), lowFreq (p (params::lowFreq), "FREQ", knobLook),
+      lowAtten (p (params::lowAtten), "ATTEN", knobLook), lowBw (p (params::lowBw), "BW", knobLook),
       midQ (p (params::midQ), "Q", knobLook), midGain (p (params::midGain), "MID", knobLook, true), midFreq (p (params::midFreq), "FREQ", knobLook),
       contour (p (params::contour), "CONTOUR", knobLook, true), contourFreq (p (params::contourFreq), "FREQ", knobLook),
-      highBoost (p (params::highBoost), "BOOST", knobLook), highFreq (p (params::highFreq), "FREQ", knobLook), highAtten (p (params::highAtten), "ATTEN", knobLook),
+      contourBw (p (params::contourBw), "BW", knobLook),
+      highBoost (p (params::highBoost), "BOOST", knobLook), highFreq (p (params::highFreq), "FREQ", knobLook),
+      highAtten (p (params::highAtten), "ATTEN", knobLook), highBw (p (params::highBw), "BW", knobLook),
       hpfOn (p (params::hpfOn), "HPF"), lpfOn (p (params::lpfOn), "LPF"),
       hpfFreq (p (params::hpfFreq), "FREQ", knobLook), lpfFreq (p (params::lpfFreq), "FREQ", knobLook),
       msLink (p (params::msLink), "M/S LINK"),
@@ -34,16 +56,25 @@ EclipseEditor::EclipseEditor (EclipseProcessor& proc)
       lowOfs (p (params::lowOffset), "LOW", knobLook, true), midOfs (p (params::midOffset), "MID", knobLook, true),
       conOfs (p (params::contourOffset), "CONTOUR", knobLook, true), highOfs (p (params::highOffset), "HIGH", knobLook, true),
       analog (p (params::analog), "ANALOG"), character (p (params::character), "CHARACTER", knobLook),
+      xformer (p (params::xformer), "XFORMER", knobLook),
       solo (p (params::solo), { "STEREO", "MID", "SIDE" }),
       delta (p (params::delta), "DELTA"), mono (p (params::mono), "MONO"),
       width (p (params::width), "WIDTH", knobLook),
       inGain (p (params::inGain), "INPUT", knobLook, true), outGain (p (params::outGain), "OUTPUT", knobLook, true),
       autoGain (p (params::autoGain), "AUTO GAIN"),
+      lowRing (p (params::lowOffset), 12.0, [this] { return sectionValues (0); }),
+      conRing (p (params::contourOffset), 10.0, [this] { return sectionValues (2); }),
+      midRing (p (params::midOffset), 12.0, [this] { return sectionValues (1); }),
+      highRing (p (params::highOffset), 12.0, [this] { return sectionValues (3); }),
+      vu (proc.meters()),
+      power (p (params::bypass), "POWER", true), hpfLed (p (params::hpfOn), "HPF"), lpfLed (p (params::lpfOn), "LPF"),
+      soloM (p (params::solo), 1, "SOLO M"), soloS (p (params::solo), 2, "SOLO S"),
       linkWatch (p (params::msLink), [this] (float v)
       {
           const bool linked = v > 0.5f;
           for (auto* k : { &lowOfs, &midOfs, &conOfs, &highOfs }) k->setAlpha (linked ? 0.38f : 1.0f);
           target.setAlpha (linked ? 0.38f : 1.0f);
+          for (auto* r : { &lowRing, &conRing, &midRing, &highRing }) r->setLinked (linked);
       }),
       bar (proc.presets, proc.apvts, "ECLIPSE", {}, baseWidth, 1000)
 {
@@ -61,14 +92,19 @@ EclipseEditor::EclipseEditor (EclipseProcessor& proc)
     }
 
     for (juce::Component* c : std::initializer_list<juce::Component*> {
-             &curve, &meterPanel, &lowBoost, &lowFreq, &lowAtten, &midQ, &midGain, &midFreq, &contour, &contourFreq,
-             &highBoost, &highFreq, &highAtten, &hpfOn, &lpfOn, &hpfFreq, &lpfFreq, &msLink, &target, &lowOfs, &midOfs, &conOfs, &highOfs,
-             &analog, &character, &solo, &delta, &mono, &width, &inGain, &outGain, &autoGain })
-        addAndMakeVisible (c);
+             &curve, &meterPanel, &lowBoost, &lowFreq, &lowAtten, &lowBw, &midQ, &midGain, &midFreq, &contour, &contourFreq, &contourBw,
+             &highBoost, &highFreq, &highAtten, &highBw, &hpfOn, &lpfOn, &hpfFreq, &lpfFreq, &msLink, &target, &lowOfs, &midOfs, &conOfs,
+             &highOfs, &analog, &character, &xformer, &solo, &delta, &mono, &width, &inGain, &outGain, &autoGain,
+             &vu, &power, &hpfLed, &lpfLed, &soloM, &soloS })
+        addChildComponent (c);
+    // les anneaux passent devant leur potard (ils ne prennent la souris que sur leur moitié droite)
+    for (auto* r : { &lowRing, &conRing, &midRing, &highRing }) addChildComponent (r);
     linkWatch.sendInitialUpdate();
 
     addAndMakeVisible (bar);
     bar.setBrand (290, [this] (juce::Graphics& g, juce::Rectangle<float> area) { paintTitle (g, area); });
+    addAndMakeVisible (viewSwitch);
+    viewSwitch.onChange = [this] (View v) { setView (v, true); };
 
 #if ECLIPSE_LICENCE
     licenseOverlay = std::make_unique<onirique::license::Overlay> (pluginName, processor.license);
@@ -78,6 +114,17 @@ EclipseEditor::EclipseEditor (EclipseProcessor& proc)
         licenseOverlay->setVisible (false);
    #endif
 #endif
+
+    // la façade : celle du projet, sinon la dernière choisie sur cet ordinateur
+    {
+        juce::String v = processor.apvts.state.getProperty ("view").toString();
+        if (v.isEmpty()) v = viewFile().loadFileAsString().trim();
+       #if ONIRIQUE_UI_TEST
+        if (const auto t = juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_TEST", {}); t.contains ("rack")) v = "rack";
+        else if (t.contains ("studio")) v = "studio";
+       #endif
+        view = v == "rack" ? View::rack : View::studio;
+    }
 
     // la taille gardée se lit AVANT de poser les limites (setResizeLimits redimensionne déjà l'éditeur)
     auto heightFor = [] (int w) { return juce::roundToInt ((float) w * (float) baseHeight / (float) baseWidth); };
@@ -93,6 +140,7 @@ EclipseEditor::EclipseEditor (EclipseProcessor& proc)
     if (juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_TEST", {}).contains ("demo"))
         setSize (baseWidth, baseHeight);
    #endif
+    setView (view, false);
     startTimerHz (4);
 
     // essais locaux : ONIRIQUE_UI_PNG=fichier → l'interface s'écrit elle-même en PNG (rendu logiciel)
@@ -102,7 +150,7 @@ EclipseEditor::EclipseEditor (EclipseProcessor& proc)
         juce::Component::SafePointer<EclipseEditor> safe (this);
         if (juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_TEST", {}).contains ("browser"))
             juce::Timer::callAfterDelay (500, [safe] { if (safe != nullptr) safe->bar.openBrowser(); });
-        juce::Timer::callAfterDelay (1200, [safe, path]
+        juce::Timer::callAfterDelay (1500, [safe, path]
         {
             if (safe == nullptr) return;
             juce::Image img (juce::Image::ARGB, safe->getWidth(), safe->getHeight(), true, juce::SoftwareImageType());
@@ -124,40 +172,114 @@ void EclipseEditor::timerCallback()
     if (onirique::look::changedSince (themeSeen) && bar.onThemeChanged) bar.onThemeChanged();
 }
 
+std::pair<double, double> EclipseEditor::sectionValues (int section) const
+{
+    const auto prm = processor.readParams();
+    const auto m = eclipse::channelSettings (prm, 0), s = eclipse::channelSettings (prm, 1);
+    auto v = [section] (const eclipse::Settings& x)
+    {
+        switch (section)
+        {
+            case 0: return x.lowB - x.lowA;
+            case 1: return x.midG;
+            case 2: return -x.conV;   // vers le haut : le centre relevé, comme sur la courbe
+            default: return x.highB - x.highA;
+        }
+    };
+    return { v (m), v (s) };
+}
+
+//==============================================================================
+void EclipseEditor::setView (View v, bool remember)
+{
+    view = v;
+    viewSwitch.view = v;
+    viewSwitch.repaint();
+    if (remember)
+    {
+        processor.apvts.state.setProperty ("view", v == View::rack ? "rack" : "studio", nullptr);
+        viewFile().getParentDirectory().createDirectory();
+        viewFile().replaceWithText (v == View::rack ? "rack" : "studio");
+    }
+    const bool r = v == View::rack;
+    // communs aux deux façades
+    for (juce::Component* c : std::initializer_list<juce::Component*> {
+             &curve, &meterPanel, &lowBoost, &lowFreq, &lowAtten, &lowBw, &midQ, &midGain, &midFreq, &contour, &contourFreq, &contourBw,
+             &highBoost, &highFreq, &highAtten, &highBw, &hpfFreq, &lpfFreq, &msLink, &target, &analog, &character, &xformer,
+             &delta, &mono, &width, &inGain, &outGain, &autoGain })
+        c->setVisible (true);
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &hpfOn, &lpfOn, &lowOfs, &midOfs, &conOfs, &highOfs, &solo })
+        c->setVisible (! r);
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &lowRing, &conRing, &midRing, &highRing, &vu, &power, &hpfLed, &lpfLed, &soloM, &soloS })
+        c->setVisible (r);
+
+    // les noms changent un peu d'une façade à l'autre
+    lowBoost.setLabel ("BOOST"); highBoost.setLabel ("BOOST");
+    for (auto* k : { &lowBw, &highBw, &contourBw }) k->setLabel (r ? "BANDWIDTH" : "BW");
+    midQ.setLabel (r ? "BANDWIDTH" : "Q");
+    hpfFreq.setLabel (r ? "HPF" : "FREQ");
+    lpfFreq.setLabel (r ? "LPF" : "FREQ");
+    character.setLabel (r ? "DRIVE" : "CHARACTER");
+    if (getWidth() > 0) resized();
+}
+
 //==============================================================================
 void EclipseEditor::resized()
 {
     const float s = scale();
-    auto place = [s] (juce::Component& c, R r) { c.setBounds (R (r.getX() * s, r.getY() * s, r.getWidth() * s, r.getHeight() * s).toNearestInt()); };
-    // un potard centré sur (cx, cy) : centre du composant entier
-    auto knob = [&] (ui::Knob& k, float cx, float cy, juce::Point<float> sz)
+    if (view == View::rack) layoutRack (s); else layoutStudio (s);
+
+    // la barre du haut : STUDIO | RACK et la pastille de licence
+    constexpr int switchW = 132, gap = 8;
+#if ECLIPSE_LICENCE
+    const int pillW = licenseOverlay != nullptr ? licenseOverlay->pillWidth() : 0;
+#else
+    const int pillW = 0;
+#endif
+    bar.setPillWidth (pillW + (pillW > 0 ? gap : 0) + switchW);
+    bar.place (s, getLocalBounds());
     {
-        place (k, R (sz.x, sz.y).withCentre ({ cx, cy }));
-        k.setScale (s);
-    };
+        auto area = bar.getPillArea();
+        const auto sw = area.removeFromLeft (switchW).withSizeKeepingCentre (switchW, 28);
+        viewSwitch.setBounds (R ((float) sw.getX() * s, (float) sw.getY() * s, (float) sw.getWidth() * s, (float) sw.getHeight() * s).toNearestInt());
+        viewSwitch.scale = s;
+#if ECLIPSE_LICENCE
+        if (licenseOverlay != nullptr)
+            licenseOverlay->fit (getLocalBounds(), s, area.withTrimmedLeft (gap), juce::Justification::centredRight);
+#endif
+    }
+    renderBackground();
+    if (sizeReady) onirique::window::remember (processor.apvts.state, getWidth(), getHeight());
+}
+
+void EclipseEditor::layoutStudio (float s)
+{
+    using namespace studio;
+    auto place = [s] (juce::Component& c, R r) { c.setBounds (R (r.getX() * s, r.getY() * s, r.getWidth() * s, r.getHeight() * s).toNearestInt()); };
+    auto knob = [&] (ui::Knob& k, float cx, float cy, juce::Point<float> sz) { place (k, R (sz.x, sz.y).withCentre ({ cx, cy })); k.setScale (s); };
     auto sw = [&] (ui::Switch& b, R r) { place (b, r); b.setScale (s); };
 
     place (curve, displayArea); curve.setScale (s);
     place (meterPanel, meterArea); meterPanel.setScale (s);
 
-    // trois grandes sections
-    auto row3 = [&] (R panel, ui::Knob& left, ui::Knob& centre, ui::Knob& right)
+    // trois grandes sections : la largeur (BW) au-dessus du renfort
+    const float cy = lowPanel.getY() + titleH + (lowPanel.getHeight() - titleH) * 0.5f;
+    knob (lowBw, lowPanel.getX() + 54, cy - 56, small);
+    knob (lowBoost, lowPanel.getX() + 54, cy + 48, medium);
+    knob (lowFreq, lowPanel.getCentreX(), cy - 4, big);
+    knob (lowAtten, lowPanel.getRight() - 54, cy + 48, medium);
+    knob (highAtten, highPanel.getX() + 54, cy + 48, medium);
+    knob (highFreq, highPanel.getCentreX(), cy - 4, big);
+    knob (highBw, highPanel.getRight() - 54, cy - 56, small);
+    knob (highBoost, highPanel.getRight() - 54, cy + 48, medium);
     {
-        const float cy = panel.getY() + titleH + (panel.getHeight() - titleH) * 0.5f;
-        knob (left, panel.getX() + 54, cy + 16, medium);
-        knob (centre, panel.getCentreX(), cy - 4, big);
-        knob (right, panel.getRight() - 54, cy + 16, medium);
-    };
-    row3 (lowPanel, lowBoost, lowFreq, lowAtten);
-    row3 (highPanel, highAtten, highFreq, highBoost);
-    {
-        const float cy = midPanel.getY() + titleH + (midPanel.getHeight() - titleH) * 0.5f;
         const float x0 = midPanel.getX();
         knob (midFreq, x0 + 52, cy + 16, medium);
         knob (midGain, x0 + 150, cy - 4, big);
         knob (midQ, x0 + 238, cy + 22, small);
-        knob (contour, x0 + 380, cy - 4, big);
-        knob (contourFreq, x0 + 476, cy + 16, medium);
+        knob (contour, x0 + 372, cy - 4, big);
+        knob (contourBw, x0 + 476, cy - 56, small);
+        knob (contourFreq, x0 + 476, cy + 48, medium);
     }
 
     // bas
@@ -180,7 +302,8 @@ void EclipseEditor::resized()
     {
         const float top = analogPanel.getY() + titleH + 6;
         sw (analog, R (analogPanel.getX() + 20, top, analogPanel.getWidth() - 40, 24));
-        knob (character, analogPanel.getCentreX(), top + 92, medium);
+        knob (character, analogPanel.getX() + 39, top + 92, small);
+        knob (xformer, analogPanel.getRight() - 39, top + 92, small);
     }
     {
         const float top = monitorPanel.getY() + titleH + 6;
@@ -195,21 +318,62 @@ void EclipseEditor::resized()
         knob (outGain, outPanel.getRight() - 52, top + 56, medium);
         sw (autoGain, R (outPanel.getX() + 36, top + 120, outPanel.getWidth() - 72, 24));
     }
+}
 
-    // la barre du haut et la pastille de licence
-#if ECLIPSE_LICENCE
-    const int pillW = licenseOverlay != nullptr ? licenseOverlay->pillWidth() : 0;
-#else
-    const int pillW = 0;
-#endif
-    bar.setPillWidth (pillW);
-    bar.place (s, getLocalBounds());
-#if ECLIPSE_LICENCE
-    if (licenseOverlay != nullptr)
-        licenseOverlay->fit (getLocalBounds(), s, bar.getPillArea(), juce::Justification::centredRight);
-#endif
-    renderBackground();
-    if (sizeReady) onirique::window::remember (processor.apvts.state, getWidth(), getHeight());
+void EclipseEditor::layoutRack (float s)
+{
+    using namespace rack;
+    auto place = [s] (juce::Component& c, R r) { c.setBounds (R (r.getX() * s, r.getY() * s, r.getWidth() * s, r.getHeight() * s).toNearestInt()); };
+    auto knob = [&] (ui::Knob& k, float cx, float cy, juce::Point<float> sz) { place (k, R (sz.x, sz.y).withCentre ({ cx, cy })); k.setScale (s); };
+    auto ring = [&] (ui::OffsetRing& r, float cx, float cy) { place (r, R (240, 200).withCentre ({ cx, cy })); r.setScale (s); };
+    auto sw = [&] (ui::Switch& b, R r) { place (b, r); b.setScale (s); };
+
+    // unité A : l'égaliseur
+    place (power, R (48, 48).withCentre ({ leftX, 112 })); power.setScale (s);
+    knob (xformer, leftX, 240, medium);
+    knob (inGain, leftX, 366, medium);
+
+    const float lowX = lowPanel.getCentreX(), highX = highPanel.getCentreX();
+    knob (lowBoost, lowX, bigY, big);           ring (lowRing, lowX, bigY);
+    knob (lowAtten, lowPanel.getX() + 56, row2, small);
+    knob (lowBw, lowPanel.getRight() - 56, row2, small);
+    knob (hpfFreq, lowPanel.getX() + 56, row3, small);
+    knob (lowFreq, lowPanel.getRight() - 56, row3, small);
+    place (hpfLed, R (26, 26).withCentre ({ lowX, row3 - 6 })); hpfLed.setScale (s);
+
+    knob (contour, contourX, bigY, big);        ring (conRing, contourX, bigY);
+    knob (contourBw, contourX, row2, small);
+    knob (contourFreq, contourX, row3, small);
+    knob (midGain, midX, bigY, big);            ring (midRing, midX, bigY);
+    knob (midQ, midX, row2, small);
+    knob (midFreq, midX, row3, small);
+    place (vu, R (600 - 62, 80, 124, 150)); vu.setScale (s);
+
+    knob (highBoost, highX, bigY, big);         ring (highRing, highX, bigY);
+    knob (highBw, highPanel.getX() + 56, row2, small);
+    knob (highAtten, highPanel.getRight() - 56, row2, small);
+    knob (highFreq, highPanel.getX() + 56, row3, small);
+    knob (lpfFreq, highPanel.getRight() - 56, row3, small);
+    place (lpfLed, R (26, 26).withCentre ({ highX, row3 - 6 })); lpfLed.setScale (s);
+
+    knob (character, rightX, 150, medium);
+    sw (analog, R (rightX - 48, 228, 96, 24));
+    knob (outGain, rightX, 366, medium);
+
+    // unité B : les outils
+    const float by = 485;
+    place (soloM, R (soloPanel.getX() + 10, by, 64, 28)); soloM.setScale (s);
+    place (soloS, R (soloPanel.getX() + 78, by, 64, 28)); soloS.setScale (s);
+    sw (delta, R (soloPanel.getX() + 146, by, 66, 28));
+    sw (msLink, R (msPanel.getX() + 12, by, 112, 28));
+    place (target, R (msPanel.getX() + 132, by + 1, 160, 26)); target.setScale (s);
+    sw (autoGain, R (msPanel.getRight() - 120, by, 108, 28));
+    sw (mono, R (monitorPanel.getX() + 12, by, 90, 28));
+    knob (width, monitorPanel.getRight() - 48, monitorPanel.getCentreY(), mini);
+
+    // unité C : la courbe et les mesures
+    place (curve, displayArea); curve.setScale (s);
+    place (meterPanel, meterArea); meterPanel.setScale (s);
 }
 
 //==============================================================================
@@ -220,9 +384,8 @@ void EclipseEditor::renderBackground()
                               juce::jmax (1, juce::roundToInt ((float) getHeight() * k)), true);
     juce::Graphics g (background);
     g.addTransform (juce::AffineTransform::scale (scale() * k));
-    using namespace ui;
 
-    // la DA ONIRIQUE : fond nuit et ses taches de braise (même dessin que VOCALBOX), puis les panneaux en verre
+    // la DA ONIRIQUE : fond nuit et ses taches de braise (même dessin que VOCALBOX)
     {
         const float u = scale() * k;
         const auto night = onirique::da::backdrop (background.getWidth(), background.getHeight(), u);
@@ -230,6 +393,13 @@ void EclipseEditor::renderBackground()
         g.addTransform (juce::AffineTransform::scale (1.0f / u));
         g.drawImageAt (night, 0, 0);
     }
+    if (view == View::rack) paintRack (g); else paintStudio (g);
+}
+
+void EclipseEditor::paintStudio (juce::Graphics& g)
+{
+    using namespace ui;
+    using namespace studio;
     const float u1 = 1.0f;   // les panneaux se dessinent en points (le zoom est déjà dans la transformation)
     onirique::da::glass (g, displayArea, 14.0f, u1);
     onirique::da::glass (g, meterArea, 14.0f, u1);
@@ -259,21 +429,99 @@ void EclipseEditor::renderBackground()
     {
         const R cr (midPanel.getX() + 292, midPanel.getY() + 30, 232, midPanel.getHeight() - 40);
         onirique::da::seg (g, cr, 0.32f, 0.0f, u1, 12.0f);
-        text (g, "MID CONTOUR", R (cr.getX(), cr.getY() + 5, cr.getWidth(), 14), font (Face::display, 9.5f, 0.2f), onirique::look::emberPink);
-        // la forme de l'ondulation, gravée
+        text (g, "MID CONTOUR", R (cr.getX() + 10, cr.getY() + 5, 120, 14), font (Face::display, 9.5f, 0.2f), onirique::look::emberPink,
+              juce::Justification::centredLeft);
         juce::Path w;
         for (int i = 0; i <= 60; ++i)
         {
-            const float t = (float) i / 60.0f, x = cr.getX() + 70 + t * 92;
-            const float y = cr.getBottom() - 14 + 5.0f * std::cos (t * juce::MathConstants<float>::twoPi * 1.0f) * std::exp (-3.0f * (t - 0.5f) * (t - 0.5f));
+            const float t = (float) i / 60.0f, x = cr.getX() + 34 + t * 92;
+            const float y = cr.getBottom() - 14 + 5.0f * std::cos (t * juce::MathConstants<float>::twoPi) * std::exp (-3.0f * (t - 0.5f) * (t - 0.5f));
             if (i == 0) w.startNewSubPath (x, y); else w.lineTo (x, y);
         }
         g.setColour (onirique::look::emberPink.withAlpha (0.6f));
         g.strokePath (w, juce::PathStrokeType (1.2f));
     }
-    // séparation entre le gain de la cloche et son Q
     g.setColour (juce::Colours::white.withAlpha (0.04f));
     g.drawVerticalLine ((int) (midPanel.getX() + 284), midPanel.getY() + 34, midPanel.getBottom() - 10);
+}
+
+void EclipseEditor::paintRack (juce::Graphics& g)
+{
+    using namespace ui;
+    using namespace rack;
+    const float u1 = 1.0f;
+
+    // les unités : verre, oreilles de rack (fentes) et vis
+    auto unit = [&] (R r)
+    {
+        onirique::da::glass (g, r, 16.0f, u1);
+        for (float x : { r.getX() + 16, r.getRight() - 16 })
+            for (float y : { r.getY() + 18, r.getBottom() - 18 })
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.55f));
+                g.fillRoundedRectangle (R (14, 8).withCentre ({ x, y }), 4.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.06f));
+                g.drawRoundedRectangle (R (14, 8).withCentre ({ x, y }), 4.0f, 0.8f);
+            }
+        for (float x : { r.getX() + 44, r.getRight() - 44 })
+            for (float y : { r.getY() + 14, r.getBottom() - 14 })
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.5f));
+                g.fillEllipse (R (7, 7).withCentre ({ x, y }));
+                g.setColour (juce::Colours::white.withAlpha (0.12f));
+                g.drawEllipse (R (7, 7).withCentre ({ x, y }), 0.8f);
+            }
+    };
+    unit (unitA); unit (unitB); unit (unitC);
+
+    // panneaux intérieurs (verre plus profond)
+    auto inner = [&] (R r)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.32f));
+        g.fillRoundedRectangle (r, 12.0f);
+        onirique::da::glass (g, r, 12.0f, u1, false);
+    };
+    for (const auto& r : { lowPanel, centrePanel, highPanel, soloPanel, msPanel, monitorPanel }) inner (r);
+
+    const auto capFont = font (Face::body, 9.5f, 0.16f);
+    auto caption = [&] (const juce::String& t, float cx, float y, juce::Colour c) { text (g, t, R (120, 14).withCentre ({ cx, y }), capFont, c); };
+    caption ("POWER", leftX, 146, haze);
+    caption ("ANALOG", rightX, 214, haze);
+    caption ("HPF", lowPanel.getCentreX(), row3 + 16, dim);
+    caption ("LPF", highPanel.getCentreX(), row3 + 16, dim);
+
+    // titres des sections
+    const auto tf = font (Face::display, 10.5f, 0.2f);
+    text (g, "LOW", R (lowPanel.getX() + 14, lowPanel.getY() + 8, 80, 14), tf, bone, juce::Justification::centredLeft);
+    text (g, "HIGH", R (highPanel.getRight() - 94, highPanel.getY() + 8, 80, 14), tf, bone, juce::Justification::centredRight);
+    text (g, "CONTOUR", R (centrePanel.getX() + 14, centrePanel.getY() + 8, 100, 14), tf, onirique::look::emberPink, juce::Justification::centredLeft);
+    text (g, "MID", R (centrePanel.getRight() - 94, centrePanel.getY() + 8, 80, 14), tf, bone, juce::Justification::centredRight);
+
+    // au centre, sous le VU : le nom
+    {
+        const juce::Point<float> c (600, 270);
+        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.35f), c.x, c.y, accent.withAlpha (0.0f), c.x + 24, c.y, true));
+        g.fillEllipse (R (48, 48).withCentre (c));
+        g.setColour (onirique::look::emberLit);
+        g.drawEllipse (R (28, 28).withCentre (c), 1.4f);
+        g.setColour (ink);
+        g.fillEllipse (R (26, 26).withCentre (c.translated (3.5f, -1.5f)));
+        text (g, "ONIRIQUE", R (200, 14).withCentre ({ 600, 306 }), font (Face::display, 10.0f, 0.3f), bone.withAlpha (0.75f));
+        text (g, "ECLIPSE", R (220, 30).withCentre ({ 600, 330 }), font (Face::display, 26.0f, 0.1f), accent);
+        text (g, "PARALLEL SATURATING MID/SIDE EQ", R (260, 12).withCentre ({ 600, 420 }), font (Face::body, 8.5f, 0.18f), dim);
+    }
+
+    // unité B
+    text (g, "MONITOR", R (soloPanel.getX() + 12, soloPanel.getY() + 4, 120, 14), font (Face::body, 8.5f, 0.18f), dim, juce::Justification::centredLeft);
+    text (g, "M/S", R (msPanel.getX() + 12, msPanel.getY() + 4, 120, 14), font (Face::body, 8.5f, 0.18f), dim, juce::Justification::centredLeft);
+    text (g, "OFFSET TO", R (msPanel.getX() + 132, msPanel.getY() + 4, 160, 14), font (Face::body, 8.5f, 0.18f), dim);
+    text (g, "IMAGE", R (monitorPanel.getX() + 12, monitorPanel.getY() + 4, 120, 14), font (Face::body, 8.5f, 0.18f), dim, juce::Justification::centredLeft);
+    if (logo.isValid())
+    {
+        g.setOpacity (0.85f);
+        g.drawImage (logo, R (36, 32).withCentre ({ leftX, unitB.getCentreY() }), juce::RectanglePlacement::centred);
+        g.setOpacity (1.0f);
+    }
 }
 
 // Le titre, dans la barre : le sigil, une éclipse (disque nuit sur sa couronne braise), ONIRIQUE, ECLIPSE
@@ -285,7 +533,6 @@ void EclipseEditor::paintTitle (juce::Graphics& g, juce::Rectangle<float> area) 
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     if (logo.isValid()) g.drawImage (logo, R (x, cy - 13, 28, 26), juce::RectanglePlacement::centred);
     x += 36;
-    // l'éclipse
     {
         const juce::Point<float> c (x + 12, cy);
         g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.55f), c.x, c.y, accent.withAlpha (0.0f), c.x + 14, c.y, true));
@@ -296,8 +543,7 @@ void EclipseEditor::paintTitle (juce::Graphics& g, juce::Rectangle<float> area) 
         g.fillEllipse (R (16, 16).withCentre (c.translated (2.2f, -1.0f)));
     }
     x += 32;
-    const auto smallFont = font (Face::display, 11.0f, 0.14f);
-    text (g, "ONIRIQUE", R (x, cy - 16, 120, 14), smallFont, bone.withAlpha (0.75f), juce::Justification::centredLeft);
+    text (g, "ONIRIQUE", R (x, cy - 16, 120, 14), font (Face::display, 11.0f, 0.14f), bone.withAlpha (0.75f), juce::Justification::centredLeft);
     text (g, "ECLIPSE", R (x - 1, cy - 4, 160, 22), font (Face::display, 20.0f, 0.1f), accent, juce::Justification::centredLeft);
     const float w = juce::GlyphArrangement::getStringWidth (font (Face::display, 20.0f, 0.1f), "ECLIPSE");
     text (g, "PARALLEL M/S MASTERING EQ", R (x + w + 10, cy + 1, 170, 14), font (Face::body, 8.5f, 0.14f), dim, juce::Justification::centredLeft);

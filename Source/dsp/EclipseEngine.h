@@ -26,6 +26,7 @@ struct EngineParams
     int target = 0;              // 0 SIDE, 1 MID, 2 SPLIT : où va l'OFFSET
     bool link = true;            // M/S LINK : les deux canaux identiques
     bool analog = true;
+    double xformer = 0.0;        // XFORMER : transformateurs d'entrée et de sortie, 0 … 1
     double character = 0.4;      // 0 … 1
     int solo = 0;                // 0 STEREO, 1 MID, 2 SIDE
     bool delta = false, mono = false;
@@ -105,6 +106,8 @@ public:
         dry.assign (2, std::vector<float> ((size_t) std::max (1, latency) + 1, 0.0f));
         dryPos = 0;
         for (auto& n : net) { n.prepare (fsO); n.reset(); }
+        for (auto* t : { &xin[0], &xin[1], &xout[0], &xout[1] }) t->prepare (fsO);
+        xfA = 1.0 - std::exp (-1.0 / (0.03 * fsO));
         haveTargets = false;
         firstBlock = true;
         rmsA = 1.0 - std::exp (-1.0 / (0.3 * fs));
@@ -167,12 +170,28 @@ public:
         float* dm = up.getChannelPointer (2);
         float* ds = up.getChannelPointer (3);
         const double analogT = p.analog ? 1.0 : 0.0;
+        const double xfT = std::clamp (p.xformer, 0.0, 1.0);
         for (int i = 0; i < nO; ++i)
         {
             if (ctrlCount-- <= 0) { ctrlCount = ctrlStep - 1; controlStep (analogT, p.character); }
             width += widthA * (p.width - width);
-            const double ym = net[0].tick (m[i]);
-            const double ys = net[1].tick (s[i]) * width;
+            xf += xfA * (xfT - xf);
+            double mi = m[i], si = s[i];
+            if (xf > 1.0e-6)
+            {
+                // transformateur d'entrée, sur L et R (là où il est dans un vrai circuit)
+                const double l = xin[0].tick (mi + si, xf), r = xin[1].tick (mi - si, xf);
+                mi = 0.5 * (l + r); si = 0.5 * (l - r);
+            }
+            else { xin[0].tick (mi + si, 0.0); xin[1].tick (mi - si, 0.0); }
+            double ym = net[0].tick (mi);
+            double ys = net[1].tick (si) * width;
+            {
+                // transformateur de sortie, un peu moins poussé
+                const double k = 0.6 * xf;
+                const double l = xout[0].tick (ym + ys, k), r = xout[1].tick (ym - ys, k);
+                if (k > 1.0e-6) { ym = 0.5 * (l + r); ys = 0.5 * (l - r); }
+            }
             dm[i] = (float) (ym - dm[i]);   // DELTA : traité - original, dans le même domaine
             ds[i] = (float) (ys - ds[i]);
             m[i] = (float) ym;
@@ -235,6 +254,7 @@ private:
         for (int c = 0; c < 2; ++c) cur[c] = targets.ch[c];
         analog = p.analog ? 1.0 : 0.0;
         width = p.width;
+        xf = std::clamp (p.xformer, 0.0, 1.0);
         inGain = dbToGain (p.inDb);
         outGain = dbToGain (p.outDb + (p.autoGain ? targets.autoGainDb : 0.0));
         const double soloT[3][3] { { 1, 0, 1 }, { 1, 0, 0 }, { 0, 1, 0 } };
@@ -276,6 +296,7 @@ private:
             logf (a.highF, t.highF); lin (a.highB, t.highB, 1e-4); lin (a.highA, t.highA, 1e-4);
             lin (a.hpfDb, t.hpfDb, 1e-3); logf (a.hpfF, t.hpfF);
             lin (a.lpfDb, t.lpfDb, 1e-3); logf (a.lpfF, t.lpfF);
+            logf (a.lowQ, t.lowQ); logf (a.highQ, t.highQ); logf (a.conW, t.conW);
 
             if (E > 1.0e-4)
             {
@@ -357,6 +378,8 @@ private:
     int dryPos = 0;
 
     Network net[2];
+    Transformer xin[2], xout[2];
+    double xf = 0, xfA = 0.001;
     Settings cur[2], lastRaw[2];
     Targets targets;
     double lastWidth = -1, lastIn = 1.0e9;

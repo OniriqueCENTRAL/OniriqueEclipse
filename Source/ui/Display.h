@@ -290,10 +290,10 @@ private:
         const auto p = getParams();
         const double fs = std::max (44100.0, getRate());
         const auto m = eclipse::channelSettings (p, 0), s = eclipse::channelSettings (p, 1);
-        const bool changed = ! (m == lastM && s == lastS && p.width == lastW && fs == lastFs);
+        const bool changed = ! (m == lastM && s == lastS && p.width == lastW && fs == lastFs && p.xformer == lastX);
         if (changed)
         {
-            lastM = m; lastS = s; lastW = p.width; lastFs = fs;
+            lastM = m; lastS = s; lastW = p.width; lastFs = fs; lastX = p.xformer;
             const auto t = eclipse::Targets::compute (p, fs);
             interaction = std::min (t.scale[0], t.scale[1]);
             const eclipse::Response r (fs);
@@ -315,8 +315,10 @@ private:
             for (int i = 0; i < N; ++i)
             {
                 const double f = freqAt (i);
-                target.mid[i] = (float) eclipse::gainToDb (std::abs (r.total (dm, f)));
-                target.side[i] = (float) eclipse::gainToDb (std::abs (r.total (ds, f)) * sideGain);
+                // les transformateurs d'entrée et de sortie arrondissent un peu l'aigu (leur partie linéaire)
+                const double xfr = std::abs (eclipse::Transformer::response (f, p.xformer, fs) * eclipse::Transformer::response (f, 0.6 * p.xformer, fs));
+                target.mid[i] = (float) eclipse::gainToDb (std::abs (r.total (dm, f)) * xfr);
+                target.side[i] = (float) eclipse::gainToDb (std::abs (r.total (ds, f)) * sideGain * xfr);
                 for (int b = 0; b < 4; ++b) target.band[b][i] = (float) eclipse::gainToDb (std::abs (1.0 + r.deviation (only[b], f)));
             }
             bool differ = false;
@@ -343,7 +345,7 @@ private:
     std::function<double()> getRate;
     Curves shown, target;
     eclipse::Settings lastM, lastS;
-    double lastW = -1, lastFs = 0, interaction = 1.0;
+    double lastW = -1, lastFs = 0, lastX = -1, interaction = 1.0;
     bool sideVisible = false;
     int hover = -1, dragging = -1, themeSeen = -1;
     float scale = 1.0f;
@@ -366,9 +368,12 @@ public:
         g.setColour (juce::Colours::black.withAlpha (0.28f));
         g.fillRoundedRectangle (b, 10 * scale);
         auto r = b.reduced (10 * scale, 8 * scale);
-        auto bars = r.removeFromTop (r.getHeight() * 0.64f);
+        // haut et étroit : les barres en haut, le reste dessous ; large (façade rack) : les barres à gauche, le reste à droite
+        const bool wide = getWidth() > getHeight();
+        auto bars = wide ? r.removeFromLeft (r.getWidth() * 0.55f) : r.removeFromTop (r.getHeight() * 0.64f);
+        if (wide) { r.removeFromLeft (12 * scale); r.removeFromTop (6 * scale); }
         auto scaleCol = bars.removeFromLeft (22 * scale);
-        const float top = bars.getY() + 14 * scale, bottom = bars.getBottom() - 2 * scale;
+        const float top = bars.getY() + 14 * scale, bottom = bars.getBottom() - (wide ? 24.0f : 2.0f) * scale;
         auto yFor = [&] (float db) { return juce::jmap (juce::jlimit (-48.0f, 6.0f, db), -48.0f, 6.0f, bottom, top); };
         for (int db : { 6, 0, -6, -12, -18, -24, -36, -48 })
         {
@@ -399,7 +404,7 @@ public:
         text (g, juce::String (hold[2] > -99 ? juce::String (std::max (hold[2], hold[3]), 1) : "-inf") + " PK",
               { bars.getX() + colW * 2, bottom + 11 * scale, colW * 2 + 8 * scale, 11 * scale }, font (Face::mono, 8.0f * scale), haze);
 
-        r.removeFromTop (16 * scale);
+        if (! wide) r.removeFromTop (16 * scale);
         // corrélation
         auto corrRow = r.removeFromTop (30 * scale);
         text (g, "MONO COMPAT", corrRow.removeFromTop (12 * scale), font (Face::body, 8.5f * scale, 0.14f), haze, juce::Justification::centredLeft);

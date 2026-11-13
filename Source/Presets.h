@@ -22,7 +22,7 @@ inline std::vector<onirique::PresetBank::Stock> stockPresets()
         { "INIT", 0, {} },
         { n ("RAP BUS \xc2\xb7 WEIGHT & AIR"), mixbus,
           { { lowFreq, 60.0f }, { lowBoost, 4.0f }, { lowAtten, 2.0f }, { contour, 2.5f }, { contourFreq, 450.0f },
-            { highFreq, 12000.0f }, { highBoost, 3.0f }, { hpfOn, 1.0f }, { hpfFreq, 24.0f }, { character, 45.0f } } },
+            { highFreq, 12000.0f }, { highBoost, 3.0f }, { hpfOn, 1.0f }, { hpfFreq, 24.0f }, { character, 45.0f }, { xformer, 25.0f } } },
         { n ("RAP BUS \xc2\xb7 KNOCK"), mixbus,
           { { lowFreq, 80.0f }, { lowBoost, 5.0f }, { lowAtten, 3.5f }, { midFreq, 2500.0f }, { midGain, 1.5f }, { midQ, 0.7f },
             { contour, 2.0f }, { contourFreq, 300.0f }, { hpfOn, 1.0f }, { hpfFreq, 28.0f }, { character, 60.0f } } },
@@ -42,7 +42,7 @@ inline std::vector<onirique::PresetBank::Stock> stockPresets()
             { hpfFreq, 80.0f }, { character, 30.0f } } },
         { n ("BEAT \xc2\xb7 VINTAGE GLOW"), beat,
           { { lowFreq, 50.0f }, { lowBoost, 3.0f }, { midFreq, 900.0f }, { midGain, 1.5f }, { midQ, 0.5f }, { highFreq, 7000.0f },
-            { highAtten, 2.0f }, { lpfOn, 1.0f }, { lpfFreq, 16000.0f }, { character, 75.0f } } },
+            { highAtten, 2.0f }, { lpfOn, 1.0f }, { lpfFreq, 16000.0f }, { character, 75.0f }, { xformer, 45.0f } } },
         { n ("BEAT \xc2\xb7 CLEAN SIDES"), beat | ms,
           { { msLink, 0.0f }, { offsetTarget, 0.0f }, { lowFreq, 180.0f }, { lowOffset, -8.0f }, { contourOffset, 2.5f },
             { contourFreq, 600.0f }, { highOffset, 2.0f }, { highFreq, 9000.0f }, { character, 30.0f } } },
@@ -57,7 +57,7 @@ inline std::vector<onirique::PresetBank::Stock> stockPresets()
             { highBoost, 1.0f }, { highOffset, 2.0f }, { contour, 1.0f }, { contourFreq, 2500.0f }, { character, 25.0f } } },
         { n ("MASTER \xc2\xb7 TAPE DARK"), master,
           { { highFreq, 6000.0f }, { highAtten, 2.5f }, { lowFreq, 70.0f }, { lowBoost, 2.0f }, { lpfOn, 1.0f }, { lpfFreq, 18000.0f },
-            { character, 70.0f } } },
+            { character, 70.0f }, { xformer, 40.0f } } },
     };
 }
 } // namespace eclipsepresets

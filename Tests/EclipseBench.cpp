@@ -137,6 +137,9 @@ static void testCurve()
     { auto p = flat(); p.base.conV = -7; p.base.conF = 2500; cases.push_back ({ "CONTOUR -7", p }); }
     { auto p = flat(); p.base.highB = 8; p.base.highA = 3; p.base.highF = 8000; cases.push_back ({ "HIGH boost + atten", p }); }
     { auto p = flat(); p.base.hpfDb = -24; p.base.hpfF = 80; p.base.lpfDb = -24; p.base.lpfF = 9000; cases.push_back ({ "HPF + LPF", p }); }
+    { auto p = flat(); p.base.lowB = 9; p.base.lowA = 4; p.base.lowQ = 1.1; p.base.lowF = 90; cases.push_back ({ "LOW BANDWIDTH Q 1.1 (3 bandes)", p }); }
+    { auto p = flat(); p.base.highB = 7; p.base.highQ = 0.38; p.base.highF = 5000; cases.push_back ({ "HIGH BANDWIDTH Q 0.38", p }); }
+    { auto p = flat(); p.base.conV = 6; p.base.conW = 4.6; p.base.conF = 900; cases.push_back ({ "CONTOUR large (x4.6)", p }); }
     { auto p = flat(); p.base.lowB = 10; p.base.lowF = 150; p.base.midG = 10; p.base.midF = 300; cases.push_back ({ "LOW + MID (interaction)", p }); }
     for (auto& c : cases) check (curveError (c.p, false) < 0.25, c.name, curveError (c.p, false));
     { auto p = flat(); p.link = false; p.target = 0; p.ofsHigh = 6; p.base.highF = 6000; p.width = 1.3;
@@ -308,6 +311,12 @@ static void testHarm()
     check (neutral < -100, "bande au neutre : aucune couleur", neutral);
     check (light < heavy && heavy < heavyMax, "la couleur monte avec la sollicitation et le caractère (heavy)", heavy);
     check (off < -100, "ANALOG éteint : linéaire", off);
+    // XFORMER : le grave sature, plus que l'aigu, et rien à 0
+    auto x = flat(); x.xformer = 0.0; const double x0 = thd (x, 60, 0.5);
+    x.xformer = 1.0; const double xLow = thd (x, 60, 0.5), xHigh = thd (x, 3000, 0.5);
+    std::printf ("  XFORMER 0 : %.1f  ·  XFORMER 100 %% à 60 Hz %.1f, à 3 kHz %.1f\n", x0, xLow, xHigh);
+    check (x0 < -100, "XFORMER à 0 : linéaire", x0);
+    check (xLow > xHigh + 10, "XFORMER : le grave sature bien plus que l'aigu", xLow - xHigh);
 }
 
 static void testRobust()
@@ -333,6 +342,7 @@ static void testRobust()
         p.analog = r.nextBool(); p.character = r.nextDouble(); p.solo = r.nextInt (3); p.delta = r.nextBool(); p.mono = r.nextBool();
         p.width = r.nextDouble() * 2; p.inDb = r.nextDouble() * 36 - 18; p.outDb = r.nextDouble() * 36 - 18; p.autoGain = r.nextBool();
         p.bypass = r.nextInt (10) == 0;
+        p.xformer = r.nextDouble(); s.lowQ = 0.35 + r.nextDouble() * 0.85; s.highQ = 0.35 + r.nextDouble() * 0.85; s.conW = 2 + r.nextDouble() * 3;
         for (int c = 0; c < 2; ++c)
             for (int i = 0; i < block; ++i)
                 b.setSample (c, i, blk % 50 == 0 ? (i % 2 ? 1.0f : -1.0f) : (float) (r.nextDouble() * 2 - 1));

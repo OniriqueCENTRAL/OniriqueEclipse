@@ -17,7 +17,8 @@ inline const juce::String lowFreq = "lowFreq", lowBoost = "lowBoost", lowAtten =
                           lowOffset = "lowOffset", midOffset = "midOffset", contourOffset = "contourOffset", highOffset = "highOffset",
                           analog = "analog", character = "character",
                           solo = "solo", delta = "delta", mono = "mono", width = "width",
-                          inGain = "inGain", outGain = "outGain", autoGain = "autoGain", bypass = "bypass";
+                          inGain = "inGain", outGain = "outGain", autoGain = "autoGain", bypass = "bypass",
+                          xformer = "xformer", lowBw = "lowBw", highBw = "highBw", contourBw = "contourBw";
 
 inline juce::String dbText (float v, int decimals = 1)
 {
@@ -120,6 +121,24 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout layout()
     db (outGain, "Output", -18.0f, 18.0f, 0.0f);
     toggle (autoGain, "Auto Gain", false, "ON", "OFF");
     toggle (bypass, "Bypass", false, "BYPASSED", "IN");
+    // transformateurs et largeur des bandes
+    pct (xformer, "Xformer", 100.0f, demo ? 30.0f : 0.0f);
+    {
+        auto bw = [&] (const String& id, const String& name)
+        {
+            NormalisableRange<float> r (0.35f, 1.2f, 0.01f);
+            r.setSkewForCentre (0.6f);
+            l.add (std::make_unique<AudioParameterFloat> (ParameterID { id, 1 }, name, r, 0.55f,
+                       AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return "Q " + String (v, 2); })
+                           .withValueFromStringFunction ([] (const String& t) { return parseNumber (t); })));
+        };
+        bw (lowBw, "Low Bandwidth");
+        bw (highBw, "High Bandwidth");
+        // écart du CONTOUR : ses flancs à /x et ×x de la fréquence, affiché en octaves
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { contourBw, 1 }, "Contour Bandwidth", NormalisableRange<float> (2.0f, 5.0f, 0.01f), 3.0f,
+                   AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (std::log2 (v), 2) + " oct"; })
+                       .withValueFromStringFunction ([] (const String& t) { return std::pow (2.0f, parseNumber (t)); })));
+    }
     return l;
 }
 
@@ -131,7 +150,7 @@ struct Reader
         for (const auto* id : { &lowFreq, &lowBoost, &lowAtten, &midFreq, &midGain, &midQ, &contour, &contourFreq, &highFreq,
                                 &highBoost, &highAtten, &hpfOn, &hpfFreq, &lpfOn, &lpfFreq, &msLink, &offsetTarget, &lowOffset,
                                 &midOffset, &contourOffset, &highOffset, &analog, &character, &solo, &delta, &mono, &width,
-                                &inGain, &outGain, &autoGain, &bypass })
+                                &inGain, &outGain, &autoGain, &bypass, &xformer, &lowBw, &highBw, &contourBw })
             v.push_back (s.getRawParameterValue (*id));
     }
 
@@ -153,6 +172,7 @@ struct Reader
         p.analog = b(); p.character = f() / 100.0;
         p.solo = (int) std::lround (f()); p.delta = b(); p.mono = b(); p.width = f() / 100.0;
         p.inDb = f(); p.outDb = f(); p.autoGain = b(); p.bypass = b();
+        p.xformer = f() / 100.0; s.lowQ = f(); s.highQ = f(); s.conW = f();
         return p;
     }
 

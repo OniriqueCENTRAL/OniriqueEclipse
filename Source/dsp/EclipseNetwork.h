@@ -94,12 +94,14 @@ struct Settings
     double highF = 10000, highB = 0, highA = 0;
     double hpfDb = 0, hpfF = 30;    // hpfDb : 0 (éteint) … -24 (allumé), lissé
     double lpfDb = 0, lpfF = 20000;
+    double lowQ = 0.55, highQ = 0.55, conW = 3.0;   // BANDWIDTH de LOW et HIGH (Q du 2e ordre), écart du CONTOUR (×)
 
     bool operator== (const Settings& o) const
     {
         return lowF == o.lowF && lowB == o.lowB && lowA == o.lowA && midF == o.midF && midG == o.midG && midQ == o.midQ
             && conF == o.conF && conV == o.conV && highF == o.highF && highB == o.highB && highA == o.highA
-            && hpfDb == o.hpfDb && hpfF == o.hpfF && lpfDb == o.lpfDb && lpfF == o.lpfF;
+            && hpfDb == o.hpfDb && hpfF == o.hpfF && lpfDb == o.lpfDb && lpfF == o.lpfF
+            && lowQ == o.lowQ && highQ == o.highQ && conW == o.conW;
     }
     bool operator!= (const Settings& o) const { return ! (*this == o); }
 };
@@ -108,16 +110,16 @@ struct Settings
 struct Design
 {
     // fréquences (Hz)
-    double fLow2, fLow1b, fLow1a, fMid, fMidLo, fMidHi, fCon, fConLo, fConHi, fHigh2, fHigh1b, fHigh1a, fHpf, fLpf;
-    double qMid, qSkirt;
+    double fLow2, fLow1b, fLow1a, fLowV, fMid, fMidLo, fMidHi, fCon, fConLo, fConHi, fHigh2, fHigh1b, fHigh1a, fHighV, fHpf, fLpf;
+    double qMid, qSkirt, qLow, qHigh, qConC, qConF;
     // gains des écarts
-    double gLowB, cLowA, gMid, oMid, cCon, fCon_, gHighB, cHighA;
+    double gLowB, cLowA, gLowV, gMid, oMid, cCon, fCon_, gHighB, cHighA, gHighV;
     // plateaux HPF / LPF
     double hpfA, lpfA;
     // part de chaque section, 0 … 1 (pour la couleur analogique)
     double amtLow, amtMid, amtCon, amtHigh;
 
-    static constexpr double qLow2 = 0.55, qCon = 0.65, qConFlank = 0.8, qShelf = 0.6;
+    static constexpr double qShelf = 0.6, qVoice = 0.9;
     static constexpr double w2 = 0.7, w1 = 0.3;   // mélange 2e / 1er ordre des renforts LOW et HIGH
 
     static Design make (const Settings& s, double fs)
@@ -125,16 +127,25 @@ struct Design
         Design d {};
         const double top = 0.45 * fs;
         auto clampF = [top] (double f) { return std::clamp (f, 5.0, top); };
-        d.fLow2 = clampF (s.lowF);  d.fLow1b = clampF (s.lowF * 0.8);  d.fLow1a = clampF (s.lowF);
+        d.fLow2 = clampF (s.lowF);  d.fLow1b = clampF (s.lowF * 0.8);  d.fLow1a = clampF (s.lowF);  d.fLowV = clampF (s.lowF * 1.9);
         d.fMid = clampF (s.midF);   d.fMidLo = clampF (s.midF / 2.4);   d.fMidHi = clampF (s.midF * 2.4);
-        d.fCon = clampF (s.conF);   d.fConLo = clampF (s.conF / 3.0);   d.fConHi = clampF (s.conF * 3.0);
-        d.fHigh2 = clampF (s.highF); d.fHigh1b = clampF (s.highF * 1.25); d.fHigh1a = clampF (s.highF);
+        d.fCon = clampF (s.conF);   d.fConLo = clampF (s.conF / s.conW);   d.fConHi = clampF (s.conF * s.conW);
+        d.fHigh2 = clampF (s.highF); d.fHigh1b = clampF (s.highF * 1.25); d.fHigh1a = clampF (s.highF); d.fHighV = clampF (s.highF / 1.9);
         d.fHpf = clampF (s.hpfF);   d.fLpf = clampF (s.lpfF);
         d.qMid = s.midQ;
         d.qSkirt = s.midQ * 1.2;
+        d.qLow = s.lowQ;
+        d.qHigh = s.highQ;
+        // un CONTOUR plus large garde la même forme : ses trois bandes s'élargissent ensemble
+        const double spread = std::sqrt (3.0 / s.conW);
+        d.qConC = 0.65 * spread;
+        d.qConF = 0.8 * spread;
 
         d.gLowB = dbToGain (std::max (0.0, s.lowB)) - 1.0;
         d.cLowA = 1.0 - dbToGain (-std::max (0.0, s.lowA));
+        // 3e bande du LOW, la voix de la courbe : un petit creux au-dessus du plateau qui se creuse avec le renfort, et
+        // une petite bosse que l'atténuation relève (les deux réglages agissent sur elle, elle les fait interagir)
+        d.gLowV = dbToGain (-0.12 * std::max (0.0, s.lowB) + 0.06 * std::max (0.0, s.lowA)) - 1.0;
         d.gMid = dbToGain (s.midG) - 1.0;
         d.oMid = dbToGain (-0.09 * s.midG) - 1.0;            // dépassement : ~1 dB de signe opposé à ±12 dB
         // positif : centre creusé de conV dB, flancs relevés de la moitié ; négatif : l'inverse
@@ -142,6 +153,7 @@ struct Design
         d.fCon_ = dbToGain (0.5 * s.conV) - 1.0;
         d.gHighB = dbToGain (std::max (0.0, s.highB)) - 1.0;
         d.cHighA = 1.0 - dbToGain (-std::max (0.0, s.highA));
+        d.gHighV = dbToGain (-0.10 * std::max (0.0, s.highB) + 0.05 * std::max (0.0, s.highA)) - 1.0;   // symétrique, sous le plateau
         d.hpfA = std::pow (10.0, std::min (0.0, s.hpfDb) / 40.0);
         d.lpfA = std::pow (10.0, std::min (0.0, s.lpfDb) / 40.0);
 
@@ -195,10 +207,12 @@ struct Response
     /** les écarts des quatre sections, sans les plateaux HPF / LPF */
     cplx deviation (const Design& d, double F) const
     {
-        cplx dev = d.gLowB * (Design::w2 * lp2 (F, d.fLow2, Design::qLow2) + Design::w1 * lp1 (F, d.fLow1b)) - d.cLowA * lp1 (F, d.fLow1a);
+        cplx dev = d.gLowB * (Design::w2 * lp2 (F, d.fLow2, d.qLow) + Design::w1 * lp1 (F, d.fLow1b)) - d.cLowA * lp1 (F, d.fLow1a)
+                 + d.gLowV * bpn (F, d.fLowV, Design::qVoice);
         dev += d.gMid * bpn (F, d.fMid, d.qMid) + d.oMid * (bpn (F, d.fMidLo, d.qSkirt) + bpn (F, d.fMidHi, d.qSkirt));
-        dev += d.cCon * bpn (F, d.fCon, Design::qCon) + d.fCon_ * (bpn (F, d.fConLo, Design::qConFlank) + bpn (F, d.fConHi, Design::qConFlank));
-        dev += d.gHighB * (Design::w2 * hp2 (F, d.fHigh2, Design::qLow2) + Design::w1 * hp1 (F, d.fHigh1b)) - d.cHighA * hp1 (F, d.fHigh1a);
+        dev += d.cCon * bpn (F, d.fCon, d.qConC) + d.fCon_ * (bpn (F, d.fConLo, d.qConF) + bpn (F, d.fConHi, d.qConF));
+        dev += d.gHighB * (Design::w2 * hp2 (F, d.fHigh2, d.qHigh) + Design::w1 * hp1 (F, d.fHigh1b)) - d.cHighA * hp1 (F, d.fHigh1a)
+             + d.gHighV * bpn (F, d.fHighV, Design::qVoice);
         return dev;
     }
 
@@ -284,7 +298,7 @@ inline double perceivedPower (const Design& d, double fs)
 struct Network
 {
     Shelf hpf, lpf;
-    Svf low2, mid, midLo, midHi, con, conLo, conHi, high2;
+    Svf low2, lowV, mid, midLo, midHi, con, conLo, conHi, high2, highV;
     OnePole low1b, low1a, high1b, high1a;
     Design d {};
     // couleur analogique par section
@@ -296,7 +310,7 @@ struct Network
     void reset()
     {
         for (auto* f : { &hpf, &lpf }) f->reset();
-        for (auto* f : { &low2, &mid, &midLo, &midHi, &con, &conLo, &conHi, &high2 }) f->reset();
+        for (auto* f : { &low2, &lowV, &mid, &midLo, &midHi, &con, &conLo, &conHi, &high2, &highV }) f->reset();
         for (auto* f : { &low1b, &low1a, &high1b, &high1a }) f->reset();
         env = dcX = dcY = 0;
     }
@@ -322,14 +336,16 @@ struct Network
         };
         shelf (hpf, d.fHpf, d.hpfA, true);
         shelf (lpf, d.fLpf, d.lpfA, false);
-        low2.set (warp (d.fLow2, fs), Design::qLow2);
-        high2.set (warp (d.fHigh2, fs), Design::qLow2);
+        low2.set (warp (d.fLow2, fs), d.qLow);
+        high2.set (warp (d.fHigh2, fs), d.qHigh);
+        lowV.set (warp (d.fLowV, fs), Design::qVoice);
+        highV.set (warp (d.fHighV, fs), Design::qVoice);
         mid.set (warp (d.fMid, fs), d.qMid);
         midLo.set (warp (d.fMidLo, fs), d.qSkirt);
         midHi.set (warp (d.fMidHi, fs), d.qSkirt);
-        con.set (warp (d.fCon, fs), Design::qCon);
-        conLo.set (warp (d.fConLo, fs), Design::qConFlank);
-        conHi.set (warp (d.fConHi, fs), Design::qConFlank);
+        con.set (warp (d.fCon, fs), d.qConC);
+        conLo.set (warp (d.fConLo, fs), d.qConF);
+        conHi.set (warp (d.fConHi, fs), d.qConF);
         low1b.set (warp (d.fLow1b, fs));  low1a.set (warp (d.fLow1a, fs));
         high1b.set (warp (d.fHigh1b, fs)); high1a.set (warp (d.fHigh1a, fs));
     }
@@ -366,15 +382,15 @@ struct Network
     inline double tick (double x)
     {
         x = lpf.tick (hpf.tick (x));
-        low2.tick (x); low1b.tick (x); low1a.tick (x);
+        low2.tick (x); low1b.tick (x); low1a.tick (x); lowV.tick (x);
         mid.tick (x); midLo.tick (x); midHi.tick (x);
         con.tick (x); conLo.tick (x); conHi.tick (x);
-        high2.tick (x); high1b.tick (x); high1a.tick (x);
+        high2.tick (x); high1b.tick (x); high1a.tick (x); highV.tick (x);
 
-        double dl = d.gLowB * (Design::w2 * low2.lp + Design::w1 * low1b.lp) - d.cLowA * low1a.lp;
+        double dl = d.gLowB * (Design::w2 * low2.lp + Design::w1 * low1b.lp) - d.cLowA * low1a.lp + d.gLowV * lowV.bpn();
         double dm = d.gMid * mid.bpn() + d.oMid * (midLo.bpn() + midHi.bpn());
         double dc = d.cCon * con.bpn() + d.fCon_ * (conLo.bpn() + conHi.bpn());
-        double dh = d.gHighB * (Design::w2 * high2.hp + Design::w1 * high1b.hp) - d.cHighA * high1a.hp;
+        double dh = d.gHighB * (Design::w2 * high2.hp + Design::w1 * high1b.hp) - d.cHighA * high1a.hp + d.gHighV * highV.bpn();
 
         if (anyWet)
         {
@@ -389,6 +405,47 @@ struct Network
         const double y = sum - dcX + dcR * dcY;
         dcX = sum; dcY = y;
         return x + y;
+    }
+};
+//==============================================================================
+/** Le transformateur (XFORMER), à l'entrée et à la sortie, sur L et R. Ce n'est pas un saturateur posé sur tout le
+    signal : comme le noyau d'un transformateur, c'est le grave qui sature (la part sous ~120 Hz passe par une courbe
+    douce, légèrement asymétrique pour les harmoniques paires), le reste passe droit ; l'aigu s'arrondit un peu (1er
+    ordre, d'autant plus bas que le transformateur est poussé). À 0, la sortie est exactement l'entrée. */
+struct Transformer
+{
+    OnePole core, hf;
+    double dcX = 0, dcY = 0, dcR = 0.999, fs = 88200, lastK = -1;
+
+    void prepare (double sampleRate) { fs = sampleRate; dcR = std::exp (-2.0 * pi * 5.0 / fs); core.set (warp (120.0, fs)); reset(); }
+    void reset() { core.reset(); hf.reset(); dcX = dcY = 0; lastK = -1; }
+
+    static double hfCorner (double k, double fs) { return std::min (0.45 * fs, 72000.0 * (1.0 - 0.45 * k)); }
+
+    /** k : 0 … 1 (lissé par l'appelant) */
+    inline double tick (double x, double k)
+    {
+        core.tick (x);
+        hf.tick (x);   // tourne toujours : pas de saut d'état quand k s'éloigne de 0
+        if (k <= 1.0e-6) { dcX = dcY = 0; return x; }
+        if (std::abs (k - lastK) > 1.0e-4) { hf.set (warp (hfCorner (k, fs), fs)); lastK = k; }
+        const double lf = core.lp;
+        const double D = 1.0 + 2.2 * k, b = 0.07 * k;
+        const double t0 = std::tanh (D * b);
+        const double sat = (std::tanh (D * (lf + b)) - t0) / (D * (1.0 - t0 * t0));
+        const double dev = k * (sat - lf);
+        const double dv = dev - dcX + dcR * dcY;   // la part continue de l'asymétrie ne passe pas
+        dcX = dev; dcY = dv;
+        const double y = x + dv;
+        return y + k * (hf.lp - x);                 // arrondi de l'aigu (linéaire)
+    }
+
+    /** la partie linéaire (l'arrondi de l'aigu), pour la courbe affichée */
+    static cplx response (double F, double k, double fs)
+    {
+        if (k <= 1.0e-6) return 1.0;
+        const cplx s (0.0, warp (std::min (F, 0.4999 * fs), fs) / warp (hfCorner (k, fs), fs));
+        return 1.0 + k * (1.0 / (1.0 + s) - 1.0);
     }
 };
 } // namespace eclipse
