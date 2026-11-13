@@ -64,7 +64,7 @@ public:
     void paintButton (juce::Graphics& g, bool over, bool) override
     {
         const auto r = getLocalBounds().toFloat().reduced (1.0f);
-        onirique::da::pill (g, r, index == pos ? 1.0f : 0.0f, over ? 1.0f : 0.0f, scale);
+        fullPill (g, r, index == pos ? 1.0f : 0.0f, over ? 1.0f : 0.0f, scale);
         ui::text (g, getButtonText(), r, font (Face::body, 10.5f * scale, 0.14f), index == pos ? bone : haze);
     }
 
@@ -196,7 +196,7 @@ public:
         // IN / OUT
         auto sel = b.withHeight (20 * scale).withSizeKeepingCentre (96 * scale, 20 * scale);
         onirique::da::glass (g, sel, sel.getHeight() * 0.5f, scale, false);
-        const auto inR = sel.withWidth (sel.getWidth() * 0.5f).reduced (2 * scale), outR = inR.translated (sel.getWidth() * 0.5f, 0);
+        const auto inR = sel.withWidth (sel.getWidth() * 0.5f).reduced (0.5f * scale), outR = inR.translated (sel.getWidth() * 0.5f, 0);
         onirique::da::seg (g, showInput ? inR : outR, 1.0f, 0.0f, scale, inR.getHeight() * 0.5f);
         text (g, "IN", inR, font (Face::body, 9.0f * scale, 0.14f), showInput ? bone : haze);
         text (g, "OUT", outR, font (Face::body, 9.0f * scale, 0.14f), showInput ? haze : bone);

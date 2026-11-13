@@ -102,7 +102,7 @@ public:
     {
         const auto r = getLocalBounds().toFloat().reduced (1.0f);
         hover += ((over ? 1.0f : 0.0f) - hover) * 0.5f;
-        onirique::da::pill (g, r, lit, over ? 1.0f : 0.0f, scale);
+        fullPill (g, r, lit, over ? 1.0f : 0.0f, scale);
         if (down) { g.setColour (juce::Colours::black.withAlpha (0.2f)); g.fillRoundedRectangle (r, r.getHeight() * 0.5f); }
         onirique::da::led (g, { r.getX() + r.getHeight() * 0.55f, r.getCentreY() }, 5.0f * scale, lit);
         ui::text (g, getButtonText(), r.withTrimmedLeft (r.getHeight() * 0.9f).withTrimmedRight (r.getHeight() * 0.3f),
@@ -139,10 +139,10 @@ public:
     {
         const auto r = getLocalBounds().toFloat().reduced (1.0f);
         onirique::da::glass (g, r, r.getHeight() * 0.5f, scale, false);
-        const float w = (r.getWidth() - 6.0f * scale) / (float) items.size();
+        const float w = (r.getWidth() - 1.0f * scale) / (float) items.size();
         for (int i = 0; i < items.size(); ++i)
         {
-            const auto cell = juce::Rectangle<float> (r.getX() + 3.0f * scale + w * (float) i, r.getY() + 3.0f * scale, w, r.getHeight() - 6.0f * scale);
+            const auto cell = juce::Rectangle<float> (r.getX() + 0.5f * scale + w * (float) i, r.getY() + 0.5f * scale, w, r.getHeight() - 1.0f * scale);
             onirique::da::seg (g, cell, i == index ? 1.0f : 0.0f, i == hover ? 1.0f : 0.0f, scale, cell.getHeight() * 0.5f);
             text (g, items[i], cell, font (Face::body, 10.0f * scale, 0.12f), i == index ? bone : haze);
         }

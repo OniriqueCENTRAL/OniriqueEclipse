@@ -71,3 +71,13 @@ inline void text (juce::Graphics& g, const juce::String& t, juce::Rectangle<floa
     g.drawText (t, r, j, false);
 }
 } // namespace ui
+
+namespace ui
+{
+/** Une gélule allumée jusqu'au bord (le pill du kit laisse un liseré sombre de 3 points autour du rouge). */
+inline void fullPill (juce::Graphics& g, juce::Rectangle<float> r, float lit, float hover, float u)
+{
+    onirique::da::glass (g, r, r.getHeight() * 0.5f, u, false);
+    onirique::da::seg (g, r, lit, hover, u, r.getHeight() * 0.5f);
+}
+} // namespace ui
