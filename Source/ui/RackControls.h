@@ -143,8 +143,8 @@ public:
             text (g, t, juce::Rectangle<float> (64 * scale, 12 * scale).withCentre (polar (c, R + 12 * scale, ang)).translated (dx * scale, dy * scale), fo, col);
         };
         label ("SIDE", -32.0f, -16.0f, -2.0f, side.withAlpha (0.85f), f);
-        label ("MID", -118.0f, -8.0f, 0.0f, accent.withAlpha (0.9f), f);
-        label ("OFFSET", 118.0f, 12.0f, 0.0f, haze.withAlpha (alpha), f);
+        label ("MID", -150.0f, -10.0f, -10.0f, accent.withAlpha (0.9f), f);
+        label ("OFFSET", 150.0f, 14.0f, -10.0f, haze.withAlpha (alpha), f);
         if (dragging || hover)
             label (offset.getCurrentValueAsText(), 32.0f, 20.0f, -2.0f, onirique::look::emberPink, font (Face::mono, 9.0f * scale));
     }
